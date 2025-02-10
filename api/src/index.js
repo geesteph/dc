@@ -1,4 +1,6 @@
 import Fastify from 'fastify';
+import "dotenv/config";
+import fetch from 'node-fetch';
 
 // Créer une instance Fastify
 const fastify = Fastify();
@@ -8,116 +10,118 @@ fastify.get('/', async (request, reply) => {
   return { hello: 'world' };
 });
 
-// Démarrer le serveur sur le port 3000
-const start = async () => {
-  try {
-    await fastify.listen({ port: 3000 });
-    console.log('Server listening on http://localhost:3000');
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
-};
-
-start();
+// Variables d'environnement
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
-const API_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI0ZDQyMzMyYjlmNGQ3OGNmZDlkOWM5MzZmNGU2NzM2NyIsIm5iZiI6MTczNzM4NDg4Ni43NjgsInN1YiI6IjY3OGU2M2I2MWFmYzM0NjQ2NzY1NDk1MiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.2RxJhqyxkKRfViFV9lJsW4maZ-gEh2bOoNdE9pPkY0Q"
+const API_KEY = process.env.TMDB_API_KEY; // Utilisation sécurisée
 
-//fonction pour trouver les film grace au titre
-async function getMovie(query){
-  const url = 'https://api.themoviedb.org/3/search/movie?query='+query+'&include_adult=false&language=en-US&page=1';
+if (!API_KEY) {
+  console.error("ERREUR: La clé API TMDB est manquante. Définissez-la dans .env");
+  process.exit(1);
+}
+
+// Fonction pour rechercher un film par titre
+async function getMovie(query) {
+  const url = `${TMDB_BASE_URL}/search/movie?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`;
   const options = {
     method: 'GET',
     headers: {
       accept: 'application/json',
-      Authorization: 'Bearer '+ API_KEY
+      Authorization: `Bearer ${API_KEY}`
     }
   };
   try {
     const response = await fetch(url, options);
-    const json = await response.json();
-    return json;
+    if (!response.ok) throw new Error(`Erreur API TMDB: ${response.statusText}`);
+    return await response.json();
   } catch (err) {
-    console.error(err);
+    console.error("Erreur lors de la récupération du film :", err);
+    return { error: "Impossible de récupérer le film" };
   }
-
 }
 
-async function getMovieId(query){
-  const url = 'https://api.themoviedb.org/3/search/movie?query='+query+'&include_adult=false&language=en-US&page=1';
-  const options = {
-    method: 'GET',
-    headers: {
-      accept: 'application/json',
-      Authorization: 'Bearer '+ API_KEY
-    }
-  };
-  try {
-    const response = await fetch(url, options);
-    const json = await response.json();
-    return json["results"][0]["id"];
-  } catch (err) {
-    console.error(err);
+// Fonction pour obtenir l'ID d'un film
+async function getMovieId(query) {
+  const data = await getMovie(query);
+  if (data.results && data.results.length > 0) {
+    return data.results[0].id;
+  } else {
+    console.error("Aucun film trouvé pour :", query);
+    return null;
   }
-
 }
 
-//fonction watchlist
-async function postWatchlist(title){
-  const id = await getMovieId(title)
-  const url = 'https://api.themoviedb.org/3/account/21763769/watchlist';
+// Ajouter un film à la watchlist
+async function postWatchlist(title) {
+  const id = await getMovieId(title);
+  if (!id) {
+    console.error(`Impossible d'ajouter "${title}" à la watchlist, ID non trouvé.`);
+    return { error: `Film "${title}" non trouvé.` };
+  }
+
+  const url = `${TMDB_BASE_URL}/account/21763769/watchlist`;
   const options = {
     method: 'POST',
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
-      Authorization: 'Bearer ' + API_KEY
+      Authorization: `Bearer ${API_KEY}`
     },
-  body: JSON.stringify({media_type: 'movie', media_id: id , watchlist: true})
+    body: JSON.stringify({ media_type: 'movie', media_id: id, watchlist: true })
   };
-try {
+
+  try {
     const response = await fetch(url, options);
-    const json = await response.json();
-    return json;
+    if (!response.ok) throw new Error(`Erreur API TMDB: ${response.statusText}`);
+    return await response.json();
   } catch (err) {
-    console.error(err);
+    console.error("Erreur lors de l'ajout à la watchlist :", err);
+    return { error: "Impossible d'ajouter le film à la watchlist" };
   }
 }
 
-
-
+// Route pour rechercher un film
 fastify.get('/search', async (request, reply) => {
   const query = request.query.name;
-  const data = await getMovie(query)
+  if (!query) return reply.status(400).send({ error: "Paramètre 'name' requis." });
 
-  return { message: `Recherché : ` +JSON.stringify(data)};
+  const data = await getMovie(query);
+  return reply.send({ results: data });
 });
 
-
-
-
+// Route pour ajouter un film à la watchlist
 fastify.post('/watchlist/title/:title', async (request, reply) => {
   const title = request.params.title;
-  // Logique pour ajouter à la watchlist avec le titre
-  postWatchlist(title)
-  return { message: `Film intitulé "${title}" ajouté à la watchlist.` }; 
+  if (!title) return reply.status(400).send({ error: "Titre requis." });
+
+  const result = await postWatchlist(title);
+  return reply.send(result);
 });
 
-
+// Route pour supprimer un film de la watchlist (par ID)
 fastify.delete('/watchlist/:id', async (request, reply) => {
   const movieId = request.params.id;
-  // Logique pour retirer du watchlist
-  return { message: `Film avec ID ${movieId} retiré de la watchlist.` };
+  if (!movieId) return reply.status(400).send({ error: "ID requis." });
+
+  return reply.send({ message: `Film avec ID ${movieId} retiré de la watchlist.` });
 });
 
-
-
+// Route pour supprimer un film de la watchlist (par titre)
 fastify.delete('/watchlist/title/:title', async (request, reply) => {
   const title = request.params.title;
-  // Logique pour retirer le film par titre
-  return { message: `Film intitulé "${title}" retiré de la watchlist.` };
+  if (!title) return reply.status(400).send({ error: "Titre requis." });
+
+  return reply.send({ message: `Film intitulé "${title}" retiré de la watchlist.` });
 });
 
+// Démarrer le serveur
+const start = async () => {
+  try {
+    await fastify.listen({ port: process.env.PORT || 3000, host: "0.0.0.0" });
+    console.log(`🚀 Serveur démarré sur http://localhost:${process.env.PORT || 3000}`);
+  } catch (err) {
+    console.error("Erreur au démarrage du serveur :", err);
+    process.exit(1);
+  }
+};
 
-
-
+start();
