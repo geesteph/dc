@@ -1,6 +1,5 @@
 import Fastify from 'fastify';
 import "dotenv/config";
-import fetch from 'node-fetch';
 
 // Créer une instance Fastify
 const fastify = Fastify();
